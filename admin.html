@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAMSA Admin - لوحة الإدارة</title>
+<style>
+body{font-family:system-ui;background:#fffaf7;color:#48372f;padding:20px;max-width:800px;margin:0 auto}
+input,button{width:100%;padding:12px;margin:8px 0;border:1px solid #dec9bc;border-radius:10px;font:inherit}
+button{background:#805b4c;color:#fff;border:0;border-radius:999px;cursor:pointer}
+.lc-item{padding:12px 0;border-bottom:1px solid #ead8ce}
+.lc-muted{font-size:13px;opacity:.7}
+a{color:#805b4c}
+</style>
+</head>
+<body>
+<h2>إدارة دعوات LAMSA - تسجيل الدخول</h2>
+<p class="lc-muted">ادخلي إيميل وباسورد الأدمن اللي في Supabase جدول site_admins</p>
+<div id="panel">
+<form id="login">
+<input name="email" type="email" required placeholder="البريد الإلكتروني">
+<input name="password" type="password" required placeholder="كلمة المرور">
+<button>تسجيل الدخول</button>
+<span id="status" class="lc-muted"></span>
+</form>
+</div>
+<script>
+const SUPABASE_URL='https://cjdmbuapbnmgvelrcqnl.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_axQA4Lpb0gC5KvWkEaVkqw_XaGE2lfu';
+const esc=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const panel=document.getElementById('panel');
+const status=document.getElementById('status');
+
+document.getElementById('login').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const form=e.target;
+  const btn=form.querySelector('button');
+  btn.disabled=true;
+  status.textContent='جاري تسجيل الدخول...';
+  try{
+    const login=await fetch(SUPABASE_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY},body:JSON.stringify({email:form.email.value.trim(),password:form.password.value})});
+    const session=await login.json();
+    if(!login.ok||!session.access_token) throw new Error(session.msg||session.message||'تعذر تسجيل الدخول');
+    const headers={'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+session.access_token,'Prefer':'return=representation'};
+    const api=async(path,opts={})=>{
+      const r=await fetch(SUPABASE_URL+'/rest/v1/'+path,{...opts,headers:{...headers,...(opts.headers||{})}});
+      const d=await r.json().catch(()=>null);
+      if(!r.ok) throw new Error(d?.message||d?.details||'فشل الطلب');
+      return d;
+    };
+    const randomToken=()=>{const a=new Uint8Array(32);crypto.getRandomValues(a);return Array.from(a).map(b=>b.toString(16).padStart(2,'0')).join('');};
+    const base=location.origin+location.pathname.replace('admin.html','');
+    
+    async function list(){
+      const rows=await api('invitations?select=id,groom_name,bride_name,event_date,public_slug,client_access_token,is_published,created_at&order=created_at.desc');
+      panel.innerHTML='<h2>إدارة دعوات LAMSA</h2><p>تم تسجيل الدخول ✓</p><button id="new">+ دعوة جديدة</button><div id="editor"></div><h3>الدعوات الحالية ('+rows.length+')</h3><div id="list"></div><p class="lc-muted"><a href="./">الرجوع للصفحة الرئيسية</a></p>';
+      document.getElementById('new').onclick=()=>editor();
+      const box=document.getElementById('list');
+      if(!rows.length) box.innerHTML='<p>لسه مفيش دعوات</p>';
+      else box.innerHTML=rows.map(r=>'<div class="lc-item"><b>'+esc(r.groom_name+' & '+r.bride_name)+'</b><p>'+esc(r.event_date||'')+' · '+(r.is_published?'منشورة':'مسودة')+'</p><p class="lc-muted">'+esc(r.public_slug||'')+'</p><button data-edit="'+esc(r.id)+'">تعديل</button> '+(r.is_published?'<button data-copy="'+esc(r.id)+'">نسخ رابط الدعوة</button> <button data-client="'+esc(r.id)+'">نسخ لوحة العميل</button>':'')+'</div>').join('');
+      box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editor(rows.find(x=>x.id===b.dataset.edit)));
+      box.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.id===b.dataset.copy);const url=base+'?invite='+encodeURIComponent(r.public_slug);navigator.clipboard.writeText(url).then(()=>alert('تم نسخ رابط الدعوة:\n'+url)).catch(()=>prompt('انسخي:',url));});
+      box.querySelectorAll('[data-client]').forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.id===b.dataset.client);const url=base+'?dashboard='+encodeURIComponent(r.public_slug)+'&token='+encodeURIComponent(r.client_access_token);navigator.clipboard.writeText(url).then(()=>alert('تم نسخ لوحة العميل:\n'+url)).catch(()=>prompt('انسخي:',url));});
+      function editor(r={}){
+        const isNew=!r.id;
+        const slugVal=r.public_slug||('invite-'+Math.random().toString(36).slice(2,9));
+        document.getElementById('editor').innerHTML='<h3>'+(isNew?'إنشاء دعوة':'تعديل')+'</h3><form id="invite-form"><input name="groom_name" required placeholder="اسم العريس" value="'+esc(r.groom_name||'')+'"><input name="bride_name" required placeholder="اسم العروسة" value="'+esc(r.bride_name||'')+'"><input name="event_date" type="date" value="'+esc(r.event_date||'')+'"><input name="public_slug" required pattern="[a-zA-Z0-9-]{3,80}" value="'+esc(slugVal)+'"><label><input type="checkbox" name="is_published" '+(r.is_published?'checked':'')+'> نشر الدعوة</label><button type="submit">حفظ</button><button type="button" id="cancel">إلغاء</button></form>';
+        document.getElementById('cancel').onclick=()=>{document.getElementById('editor').innerHTML='';};
+        document.getElementById('invite-form').onsubmit=async ev=>{
+          ev.preventDefault();
+          const f=ev.currentTarget;
+          const obj=Object.fromEntries(new FormData(f).entries());
+          obj.is_published=!!f.is_published.checked;
+          for(const k of Object.keys(obj)) if(typeof obj[k]==='string') obj[k]=obj[k].trim();
+          try{
+            if(isNew){obj.client_access_token=randomToken(); await api('invitations',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(obj)});}
+            else{ await api('invitations?id=eq.'+encodeURIComponent(r.id),{method:'PATCH',body:JSON.stringify(obj)});}
+            alert('تم الحفظ'); await list();
+          }catch(ex){alert(ex.message);}
+        };
+      }
+    }
+    await list();
+  }catch(ex){status.textContent=ex.message; btn.disabled=false;}
+});
+</script>
+</body>
+</html>
